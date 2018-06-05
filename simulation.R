@@ -8,8 +8,8 @@ set.seed(2436); nsim <- 500; counter <- 1; n <- 500; nsplits <- 2
 # zvals = P(Z = 1); attvals = ATT; lambdaZvals <- E{lambdaZ(X)}
 zvals <- 2:8/10; attvals <- 3; lambda1vals <- 0.7; lambda0vals <- 0.3
 
-# unobs = E{Y^0|A = 1, Z = 0, X}, which cannot be observed
-unobsvals <- c(0.0, 0.5)
+# unobs = E{Y^0|A = 1, Z = 0, X} in [0,1], which cannot be observed
+unobsvals <- c(0.0, 0.5, 1.0)
 
 cols <- c("att", "mean.z", "mean.a", "lambda0", "lambda1", "unobs",
           "psi1","psi1.ci1", "psi1.ci2", 
@@ -80,8 +80,10 @@ for(att in attvals) {
           for(i in 1:nsim) { 
             
             mess <- paste0("ATT = ", att, "; P(Z = 1) = ", zval,
-                           "; P(A = 1) = ", round(p, 2), "; sim = ", i)
-            if(i%%1 == 0) print(mess); flush.console() 
+                           "; P(A = 1) = ", round(p, 2), 
+                           "; E{Y^0|A = 1, Z = 0, X} = ", unobs,
+                           "; sim = ", i)
+            if(i%%10 == 0) print(mess); flush.console() 
             
             # Simulate covariate (x), treat. assignment (z), treat. received (a)
             x <- rnorm(n); piz <- pi.x(alpha, x); z <- rbinom(n, 1, piz)
