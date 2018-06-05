@@ -4,37 +4,19 @@ expit <- function(x){ exp(x)/(1+exp(x)) }; logit <- function(x) { log(x/(1-x))}
 
 b0 <- 1 #b0 = 0 means CRT
 
-pi.x <- function(alpha, x) { 
+# to avoid problems with positivity assumption, we truncate the prop. scores
+truncate_ps <- function(pscores) {
   
-  pz <- expit(alpha + b0*x) 
+  ps <- pscores
+  ps[which(ps > 0.999 | is.nan(ps))] <- 0.999; ps[which(ps < 0.001)] <- 0.001
   
-  pz[which(pz > 0.999 | is.nan(pz))] <- 0.999
-  pz[which(pz < 0.001)] <- 0.001
-  
-  return(pz)
-  
-}
-
-lambda1.x <- function(beta, x) { 
-  
-  pa1 <- expit(beta + 2*x) 
-  pa1[which(pa1 > 0.999 | is.nan(pa1))] <- 0.999
-  pa1[which(pa1 < 0.001)] <- 0.001
-  
-  return(pa1)
+  return(ps)
   
 }
 
-lambda0.x <- function(gamma, x) { 
-  
-  pa0 <- expit(gamma - x) 
-  
-  pa0[which(pa0 > 0.999 | is.nan(pa0))] <- 0.999
-  pa0[which(pa0 < 0.001)] <- 0.001
-  
-  return(pa0)
-  
-}
+pi.x <- function(alpha, x) { return( truncate_ps( expit(alpha + b0*x) ) ) }
+lambda1.x <- function(beta, x) { return( truncate_ps( expit(beta + 2*x) ) ) }
+lambda0.x <- function(gamma, x) { return( truncate_ps( expit(gamma - x) ) ) }
 
 pa.x <- function(alpha, beta, gamma, x) {
   
@@ -54,7 +36,7 @@ mu1.x <- function(beta, delta, x) {
     mean.y(x, 0, delta)*(1 - lambda1.x(beta, x))
   
 }
-
+# calculate E{Y|X,Z=0} = E{Y|X,A=1,Z=0}lambda0(X) + E{Y|X,A=0,Z=0}(1-lambda0(X))
 mu0.x <- function(gamma, delta, x) {
   
   mean.y(x, 1, delta)*lambda0.x(gamma, x) + 
@@ -80,19 +62,19 @@ get_psi1 <- function(y, a, z, x, piz, mu0) {
   
 }
 
+# Using formula from Imbens & Mansky (2004)
 get_calpha <- function(n, lo, hi) {
   
   delta.seq <- seq(-5, 5, length.out = 1e4)
+  
   fn <- function(calpha) { pnorm(calpha + sqrt(n)*(hi - lo)/max(c(hi,lo))) -
-      pnorm(-calpha) }
-  vals <- sapply(delta.seq, fn)
+      pnorm(-calpha) }; vals <- sapply(delta.seq, fn)
+  
   delta <- delta.seq[which.min(abs(0.95 - vals))]
   
 }
 
 # compute proposed estimator
-# mu0 <- mu0hat; mu1 <- mu1hat; lambda1 <- lambda1hat; lambda0 <- lambda0hat
-# beta10 <- beta10hat
 get_psi2 <- function(y, a, z, x, piz, mu0, mu1, lambda1, lambda0, beta10) {
   
   est.x.num.up <-  piz*(z/piz*(y - mu1) - (1-z)/(1-piz)*(y - mu0) + mu1 - mu0) +
@@ -124,19 +106,13 @@ get_psi2 <- function(y, a, z, x, piz, mu0, mu1, lambda1, lambda0, beta10) {
   
 }
 
-# delta(x) = E{Y|A = 1, Z = 1, X} - E{Y|A = 0, Z = 1, X}
-beta.x <- function(delta, x) {
-  
-  mean.y(x, 1, delta) - mean.y(x, 0, delta)
-  
-}
-
 eff.infl.curve <- function(y, a, z, x, alpha, beta, gamma, delta, p, att, lo) {
   
   pz <- pi.x(alpha, x); pa0 <- lambda0.x(gamma, x); pa1 <- lambda1.x(beta, x)
   
   mu1 <- mu1.x(beta, delta, x); mu0 <- mu0.x(gamma, delta, x)
   beta10 <- mean.y(x, 1, delta)
+  
   mu <- mu1 - mu0; lambda <- pa1 - pa0
   
   infl.curve.up <- z*(y - mu1) - (1-z)*pz/(1-pz)*(y - mu0) + pz*mu +
@@ -161,7 +137,7 @@ get_eff_bound <- function(alpha, beta, gamma, delta, p, att) {
       
       eff.infl.curve(y, a, z, x, alpha, beta, gamma, delta, p, att, 
                      lo)^2*dnorm(y, mean.y(x,a,delta)) }, -200, 200) } 
-    )
+  )
   
   inn.fn2 <- function(x,lo) {
     
