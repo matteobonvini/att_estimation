@@ -1,4 +1,4 @@
-setwd("C:/Users/matte/Desktop/crt onesided noncompliance/code")
+setwd("C:/Users/matte/Desktop/crt onesided noncompliance/att_estimation")
 
 library(ranger); library(dplyr); library(distrEx); source("./helpers.R")
 
@@ -6,10 +6,11 @@ library(ranger); library(dplyr); library(distrEx); source("./helpers.R")
 set.seed(2436); nsim <- 500; counter <- 1; n <- 500; nsplits <- 2
 
 # zvals = P(Z = 1); attvals = ATT; lambdaZvals <- E{lambdaZ(X)}
-zvals <- 2:8/10; attvals <- 3; lambda1vals <- 0.7; lambda0vals <- 0.3
+zvals <- c(0.2, 0.4, 0.5, 0.6, 0.8); attvals <- 3
+lambda1vals <- 0.7; lambda0vals <- 0.3
 
 # unobs = E{Y^0|A = 1, Z = 0, X} in [0,1], which cannot be observed
-unobsvals <- c(0.0, 0.5, 1.0)
+unobsvals <- 0.5
 
 cols <- c("att", "mean.z", "mean.a", "lambda0", "lambda1", "unobs",
           "psi1","psi1.ci1", "psi1.ci2", 
@@ -38,44 +39,44 @@ for(att in attvals) {
           # to achieve the desired value for P(Z = 1) = zval
           pz <- function(alpha) { 
             
-            distrExIntegrate(function(x) { pi.x(alpha,x)*dnorm(x) }, -200, 200) 
+            distrExIntegrate(function(x) { pi.x(alpha,x,FALSE)*dnorm(x) }, 
+                             -200, 200) 
             
           }; alpha <- get_par(pz, -20, 20, zval)
           
           pa1 <- function(beta) { 
             
-            distrExIntegrate(function(x) { lambda1.x(beta,x)*dnorm(x) }, 
+            distrExIntegrate(function(x) { lambda1.x(beta,x,TRUE)*dnorm(x) }, 
                              -200, 200) 
             
           }; beta <- get_par(pa1, -20, 20, lambda1)
           
           pa0 <- function(gamma) { 
             
-            distrExIntegrate(function(x) { lambda0.x(gamma,x)*dnorm(x) }, 
+            distrExIntegrate(function(x) { lambda0.x(gamma,x,TRUE)*dnorm(x) }, 
                              -200, 200) 
             
-          }; gamma <- get_par(pa0, -20, 20, lambda0)
+          }; gamma <- get_par(pa0, -200, 200, lambda0)
           
           # calculate p = P(A = 1)
-          p <- distrExIntegrate(function(x) {pa.x(alpha,beta,gamma,x)*dnorm(x)}, 
-                                -500, 500)
+          p <- distrExIntegrate(function(x) { 
+            pa.x(alpha,beta,gamma,x,FALSE)*dnorm(x) }, 
+                                -200, 200)
           
           num <- function(delta) { distrExIntegrate(function(x) { 
             
-            (pi.x(alpha,x)*mu.x(beta,gamma,delta,x) + 
-               lambda0.x(gamma,x)*(mean.y(x,1,delta) - unobs))*dnorm(x) }, 
+            (pi.x(alpha,x,TRUE)*mu.x(beta,gamma,delta,x,TRUE) + 
+               lambda0.x(gamma,x,TRUE)*(mean.y(x,1,delta) - unobs))*dnorm(x) }, 
             
-            -500, 500) }; att.fn <- function(delta) { num(delta)/p }
+            -200, 200) }; att.fn <- function(delta) { num(delta)/p }
           
           delta <- get_par(att.fn, -200, 200, att)
 
           res[counter:(counter+nsim-1), c("eff.bound.lo")] <- 
-            get_eff_bound(alpha, beta, gamma, delta, p, att)[1]
+            get_eff_bound(alpha, beta, gamma, delta, p, att, TRUE)[1]
           
           res[counter:(counter+nsim-1), c("eff.bound.up")] <- 
-            get_eff_bound(alpha, beta, gamma, delta, p, att)[2]
-          
-          
+            get_eff_bound(alpha, beta, gamma, delta, p, att, TRUE)[2]
           
           for(i in 1:nsim) { 
             
@@ -83,11 +84,12 @@ for(att in attvals) {
                            "; P(A = 1) = ", round(p, 2), 
                            "; E{Y^0|A = 1, Z = 0, X} = ", unobs,
                            "; sim = ", i)
-            if(i%%10 == 0) print(mess); flush.console() 
+            if(i%%1 == 0) print(mess); flush.console() 
             
             # Simulate covariate (x), treat. assignment (z), treat. received (a)
-            x <- rnorm(n); piz <- pi.x(alpha, x); z <- rbinom(n, 1, piz)
-            a <- rbinom(n,1,z*lambda1.x(beta,x) + (1-z)*lambda0.x(gamma,x))
+            x <- rnorm(n); piz <- pi.x(alpha, x,TRUE); z <- rbinom(n, 1, piz)
+            a <- rbinom(n, 1, z*lambda1.x(beta,x,TRUE) + 
+                          (1-z)*lambda0.x(gamma,x,TRUE))
             y <- rnorm(n, mean.y(x,a,delta), 1)
             
             mu0hat <- mu1hat <- lambda1hat <- lambda0hat <- beta10hat <- 
@@ -114,7 +116,7 @@ for(att in attvals) {
                 lambda0hat[test.row] <- predict(lambda0fit,newdata=test,
                                                 type="response")
                 
-                beta10fit <- ranger(y~x, data=train0[train0$a == 1,])
+                beta10fit <- ranger(y*a~x, data=train0)
                 beta10hat[test.row] <- predict(beta10fit, data=test)$predictions
                 
               } else { lambda0hat[test.row] <- beta10hat[test.row] <- 0 }
@@ -164,21 +166,21 @@ for(att in attvals) {
 agg.res <- res %>% group_by(att, mean.z, mean.a, lambda0, lambda1, unobs) %>%
   
   summarize(
-    # bias.psi1 = mean(psi1 - att),
+    bias.psi1 = mean(psi1 - att),
     bias.psi2 = mean(psi2 - att),
     
-    # cvg.psi1 = mean(psi1.ci1 < att & att < psi1.ci2),
+    cvg.psi1 = mean(psi1.ci1 < att & att < psi1.ci2),
     cvg.psi2 = mean(psi2.ci1 < att & att < psi2.ci2),
     
-    # eff.ps1 = mean(psi1.ci2 - psi1.ci1),
-    length.ci.ps2 = mean(psi2.ci2 - psi2.ci1),
+    length.ci.psi1 = mean(psi1.ci2 - psi1.ci1),
+    length.ci.psi2 = mean(psi2.ci2 - psi2.ci1),
     
-    # var.psi1 = mean(psi1.var),
+    var.psi1 = mean(psi1.var),
     var.psi2 = mean(psi2.var),
     var.psi2.lo = mean(psi2.var.lo),
     var.psi2.up = mean(psi2.var.up),
     
-    # eff.ratio.1to2 = mean(psi1.var/psi2.var),
+    eff.ratio.1to2 = mean(psi1.var/psi2.var),
     
     eff.bound.lo = mean(eff.bound.lo),
     eff.bound.up = mean(eff.bound.up),
@@ -186,4 +188,6 @@ agg.res <- res %>% group_by(att, mean.z, mean.a, lambda0, lambda1, unobs) %>%
     psi2.to.eff.lo = mean(var.psi2.lo/eff.bound.lo),
     psi2.to.eff.up = mean(var.psi2.up/eff.bound.up))
 
-round(agg.res, 2)
+rounded.agg.res <- round(agg.res, 2)
+
+save(res, file = "./results_twosided.RData")
