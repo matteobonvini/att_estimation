@@ -6,9 +6,8 @@ b0 <- 1 #b0 = 0 means CRT
 
 
 # to avoid problems with positivity assumption, we truncate the prop. scores
-truncate_ps <- function(pscores) {
+truncate_ps <- function(pscores, eps = 1e-8) {
   
-  eps <- 1e-8
   ps <- pscores
   ps[which(ps > 1-eps | is.nan(ps))] <- 1-eps; ps[which(ps < eps)] <- eps
   return(ps)
@@ -46,26 +45,39 @@ pa.x <- function(alpha, beta, gamma, x, trunc) {
 b1 <- b2 <- b3 <- 1 # they are all set to 1 in the poster
 
 # E{Y|X, A=a, Z=z} = E{Y|X, A = a}
-mean.y <- function(x, a, delta) { b1 + b2*x + b3*a + delta*a*x }
+mean.y <- function(x, a, delta, trunc) { 
+  
+  probs <- a*expit(-delta + x) + (1-a)*expit(delta + x)
+  
+  if(trunc) return(truncate_ps(probs))
+  if(!trunc) return(probs)
+    
+}
 
 # calculate E{Y|X,Z=1} = E{Y|X,A=1,Z=1}lambda1(X) + E{Y|X,A=0,Z=1}(1-lambda1(X))
 mu1.x <- function(beta, delta, x, trunc) {
   
-  mean.y(x, 1, delta)*lambda1.x(beta, x, trunc) + 
-    mean.y(x, 0, delta)*(1 - lambda1.x(beta, x, trunc))
+  mean.y(x, 1, delta, trunc)*lambda1.x(beta, x, trunc) + 
+    mean.y(x, 0, delta, trunc)*(1 - lambda1.x(beta, x, trunc))
   
 }
 # calculate E{Y|X,Z=0} = E{Y|X,A=1,Z=0}lambda0(X) + E{Y|X,A=0,Z=0}(1-lambda0(X))
 mu0.x <- function(gamma, delta, x, trunc) {
   
-  mean.y(x, 1, delta)*lambda0.x(gamma, x, trunc) + 
-    mean.y(x, 0, delta)*(1 - lambda0.x(gamma, x, trunc))
+  mean.y(x, 1, delta, trunc)*lambda0.x(gamma, x, trunc) + 
+    mean.y(x, 0, delta, trunc)*(1 - lambda0.x(gamma, x, trunc))
   
 }
 
 mu.x <- function(beta, gamma, delta, x, trunc) {
   
   mu1.x(beta, delta, x, trunc) - mu0.x(gamma, delta, x, trunc)
+  
+}
+
+lambda.x <- function(beta,gamma,x,trunc) {
+  
+  lambda1.x(beta,x,trunc) - lambda0.x(gamma,x,trunc)
   
 }
 
@@ -94,16 +106,33 @@ get_calpha <- function(n, lo, hi) {
 }
 
 # compute proposed estimator
-get_psi2 <- function(y, a, z, x, piz, mu0, mu1, lambda1, lambda0, beta10) {
+get_phi <- function(t, z, pix, mu) {
   
-  est.x.num.up <-  piz*(z/piz*(y - mu1) - (1-z)/(1-piz)*(y - mu0) + mu1 - mu0) +
-    (1-z)/(1-piz)*(y*a - beta10) + beta10
+  return(z/pix*(t - mu) + mu)
   
-  est.x.den.up <- piz*(z/piz*(a - lambda1) + lambda1) +
-    (1-piz)*((1-z)/(1-piz)*(a - lambda0) + lambda0)
+}
+
+get_psi2 <- function(y, a, z, x, piz, mu0, mu1, lambda1, lambda0, beta10, 
+                     experiment) {
   
-  est.x.num.lo <- est.x.num.up - (1-z)/(1-piz)*(a - lambda0) - lambda0
+  est.x.num.up <-  piz*(get_phi(y,z,piz,mu1) - get_phi(y,1-z,1-piz,mu0)) +
+    get_phi(y*a,1-z,1-piz,beta10)
+  
+  est.x.den.up <- piz*(get_phi(a,z,piz,lambda1)) + 
+    (1-piz)*get_phi(a,1-z,1-piz,lambda0)
+  
+  est.x.num.lo <- est.x.num.up - get_phi(a,1-z,1-piz,lambda0)
   est.x.den.lo <- est.x.den.up
+  
+  if (!experiment) {
+    
+    est.x.num.up <- est.x.num.up + (mu1 - mu0)*(z - piz)
+    est.x.num.lo <- est.x.num.lo + (mu1 - mu0)*(z - piz)
+    
+    est.x.den.up <- est.x.den.up + (lambda1 - lambda0)*(z - piz)
+    est.x.den.lo <- est.x.den.lo + (lambda1 - lambda0)*(z - piz)
+    
+  }
   
   est.up <- mean(est.x.num.up)/mean(est.x.den.up)
   est.lo <- mean(est.x.num.lo)/mean(est.x.den.lo)
@@ -117,7 +146,7 @@ get_psi2 <- function(y, a, z, x, piz, mu0, mu1, lambda1, lambda0, beta10) {
   
   ci <- c(est.lo - calpha*se.lo, est.up + calpha*se.up)
   
-  se <- (ci[2] - ci[1])/(2*calpha)*sqrt(n)
+  se <- (ci[2] - ci[1])/(2*calpha)*sqrt(length(y))
   
   out <- list(est = mean(c(est.lo, est.up)), se = se, 
               var = se^2, var.lo.bd = var.est.lo, var.up.bd = var.est.up, 
@@ -128,7 +157,7 @@ get_psi2 <- function(y, a, z, x, piz, mu0, mu1, lambda1, lambda0, beta10) {
 }
 
 eff.infl.curve <- function(y, a, z, x, alpha, beta, gamma, delta, p, att, lo, 
-                           trunc) {
+                           trunc, experiment) {
   
   pz <- pi.x(alpha, x, trunc)
   
@@ -137,15 +166,22 @@ eff.infl.curve <- function(y, a, z, x, alpha, beta, gamma, delta, p, att, lo,
   mu1 <- mu1.x(beta, delta, x, trunc)
   mu0 <- mu0.x(gamma, delta, x, trunc)
   
-  beta10 <- mean.y(x, 1, delta)
+  beta10 <- mean.y(x, 1, delta, trunc)
   
-  infl.curve.up <- 1/p*( pz*(z/pz*(y - mu1) - (1-z)/(1-pz)*(y - mu0) + mu1 - mu0) +
+  infl.curve.up <- 1/p*( pz*(get_phi(y,z,pz,mu1) - get_phi(y,1-z,1-pz,mu0) ) +
     
-    (1-z)/(1-pz)*( y*a - pa0*beta10 ) + pa0*beta10 -
+    get_phi(y*a,1-z,1-pz,pa0*beta10) -
     
-    att*( pz*(z/pz*(a - pa1) + pa1) + (1-pz)*((1-z)/(1-pz)*(a - pa0) + pa0) ) )
+    att*(pz*get_phi(a,z,pz,pa1) + (1-pz)*get_phi(a,1-z,1-pz,pa0)) )
   
-  infl.curve.lo <- infl.curve.up - 1/p*( (a - pa0)*(1-z)/(1-pz) - pa0 )
+  infl.curve.lo <- infl.curve.up - 1/p*( get_phi(a,1-z,1-pz,pa0) )
+  
+  if(!experiment) {
+    
+    infl.curve.up <- infl.curve.up + (mu1 - mu0 - att*(pa1 - pa0))*(z - pz)/p
+    infl.curve.lo <- infl.curve.lo + (mu1 - mu0 - att*(pa1 - pa0))*(z - pz)/p
+    
+  }
   
   if(lo) out <- infl.curve.lo else out <- infl.curve.up
   
@@ -153,11 +189,17 @@ eff.infl.curve <- function(y, a, z, x, alpha, beta, gamma, delta, p, att, lo,
   
 }
 
-get_eff_bound <- function(alpha, beta, gamma, delta, p, att, trunc) {
+get_eff_bound <- function(alpha, beta, gamma, delta, p, att, trunc, experiment){
   
   inn.fn <- function(y, x, lo) {
     
-    dy <- function(y, a, x) { return(dnorm(y, mean.y(x, a, delta))) } 
+    dy <- function(y, a, x) { 
+      
+      if(y==1) return(mean.y(x, a, delta, trunc))
+      if(y==0) return(1 - mean.y(x, a, delta, trunc))
+      
+    } 
+    
     da <- function(a, z, x) { 
       
       if(a==1 & z==1) return(lambda1.x(beta,x,trunc))
@@ -166,6 +208,7 @@ get_eff_bound <- function(alpha, beta, gamma, delta, p, att, trunc) {
       if(a==0 & z==0) return(1-lambda0.x(gamma,x,trunc))
       
     }
+    
     dz <- function(z, x) {
       
       if(z==1) return(pi.x(alpha,x,trunc))
@@ -181,29 +224,53 @@ get_eff_bound <- function(alpha, beta, gamma, delta, p, att, trunc) {
     
     out <- {
       
-      eff.infl.curve(y,1,1,x,alpha,beta,gamma,delta,p,att,lo,trunc)^2*dens11 +
-      eff.infl.curve(y,1,0,x,alpha,beta,gamma,delta,p,att,lo,trunc)^2*dens10 +
-      eff.infl.curve(y,0,1,x,alpha,beta,gamma,delta,p,att,lo,trunc)^2*dens01 +
-      eff.infl.curve(y,0,0,x,alpha,beta,gamma,delta,p,att,lo,trunc)^2*dens00
+      eff.infl.curve(y,1,1,x,alpha,beta,gamma,delta,p,att,lo,trunc,
+                     experiment)^2*dens11 +
+      eff.infl.curve(y,1,0,x,alpha,beta,gamma,delta,p,att,lo,trunc,
+                     experiment)^2*dens10 +
+      eff.infl.curve(y,0,1,x,alpha,beta,gamma,delta,p,att,lo,trunc,
+                     experiment)^2*dens01 +
+      eff.infl.curve(y,0,0,x,alpha,beta,gamma,delta,p,att,lo,trunc,
+                     experiment)^2*dens00
       
     }
 
     return(out)
 
   }
+  
+  prec <- Inf
 
-  inn.fn1 <- Vectorize(function(x, lo) {
-    distrExIntegrate(function(y) { inn.fn(y, x, lo) }, -500, 500)
-  })
+  inn.fn1 <- Vectorize(function(x, lo) { inn.fn(0, x, lo) + inn.fn(1, x, lo) } )
 
-  eff.bound.lo <- distrExIntegrate(function(x) { inn.fn1(x, TRUE) }, -500, 500)
-  eff.bound.up <- distrExIntegrate(function(x) { inn.fn1(x, FALSE) }, -500, 500)
+  eff.bound.lo <- distrExIntegrate(function(x) { inn.fn1(x, TRUE) }, 
+                                   -prec, prec)
+  eff.bound.up <- distrExIntegrate(function(x) { inn.fn1(x, FALSE) }, 
+                                   -prec, prec)
   
   out <- c(eff.bound.lo, eff.bound.up)
   
-  if(any(out <= 0)) stop("Efficiency bounds are negative!")
+  # if(any(out <= 0)) stop("Efficiency bounds are negative!")
   
   return(out)
+  
+}
+
+get_difference <- function(alpha, beta, gamma, delta, p, att, trunc=TRUE) {
+  
+  inn.fn <- function(x) { 
+    
+    varz <- pi.x(alpha,x,TRUE)*(1-pi.x(alpha,x,TRUE))
+    
+    out <- ((mu.x(beta,gamma,delta,x,TRUE) - 
+        att*lambda.x(beta,gamma,x,TRUE))^2*varz)/p^2
+    
+    return(out)
+  }
+  
+  diff <- distrExIntegrate(function(x) { inn.fn(x)*dnorm(x) }, -Inf, Inf)
+  
+  return(diff)
   
 }
 
@@ -223,9 +290,80 @@ get_par <- function(fn, lo, hi, par) {
   return(delta)
   
 }
-beta.x <- function(alpha, gamma, beta, x) {
+# beta.x <- function(alpha, gamma, beta, x) {
+#   
+#   mean.y(x, 1, beta, trunc) - mean.y(x, 0, beta)
+#   
+# }
+
+ivatt <- function(y, a, z, x, pi.x=NULL, nsplits = 5) {
   
-  mean.y(x, 1, beta) - mean.y(x, 0, beta)
+  if(is.null(pi.x)) experiment <- FALSE
+  else experiment <- TRUE
+  
+  df <- cbind(data.frame(y = y, a = a, z = z), x)
+  
+  x <- names(x)
+  
+  n <- nrow(df)
+  
+  mu0hat <- mu1hat <- lambda1hat <- lambda0hat <- beta10hat <- 
+    pihat <- rep(NA, n)
+  
+  s <- sample(rep(1:nsplits, ceiling(n/nsplits))[1:n])
+  
+  for (vfold in 1:nsplits) {
+    
+    train.row <- s != vfold; test.row <- s == vfold
+    
+    if (nsplits == 1) { train.row <- test.row }
+    
+    train <- df[train.row,]; test <- df[test.row,]
+    train1 <- train[train$z==1,]; train0 <- train[train$z==0,]
+    
+    # Estimation of the nuisance regression functions
+    
+    if(sum(train0$a) > 0) {
+      
+      lambda0fit <- glm(a~ . -(y+z), data=train0, family=binomial)
+      lambda0hat[test.row] <- predict(lambda0fit,newdata=test,
+                                      type="response")
+      beta10fit <- glm(y~ . -(a+z), data=train0[train0$a == 1, ],
+                       family=binomial)
+      beta10hat[test.row] <- predict(beta10fit,newdata=test,
+                                     type="response")
+      
+    } else { lambda0hat[test.row] <- beta10hat[test.row] <- 0 }
+    
+    if(experiment) { pihat <- pi.x }
+    
+    else {
+      
+      pifit <- glm(z~ . -(y+a), data=train, family=binomial)
+      pihat[test.row] <- predict(pifit,newdata=test, 
+                                 type="response")
+      
+    }
+    
+    mu0fit <- glm(y~ . -(z+a), data=train0, family=binomial)
+    mu0hat[test.row] <- predict(mu0fit, newdata=test,
+                                type="response")
+    
+    mu1fit <- glm(y~ . -(z+a), data=train1, family=binomial)
+    mu1hat[test.row] <- predict(mu1fit, newdata=test,
+                                type="response")
+    
+    lambda1fit <- glm(a~ . -(z+y), data=train1, family=binomial)
+    lambda1hat[test.row] <- predict(lambda1fit,newdata=test,
+                                    type="response")
+    
+  }
+  
+  pihat.trunc <- truncate_ps(pihat, 0.01)
+  
+  psi2 <- get_psi2(y,a,z,x,pihat.trunc,mu0hat,mu1hat,lambda1hat,
+                   lambda0hat, beta10hat*lambda0hat,experiment)
+  
+  return(psi2)
   
 }
-
