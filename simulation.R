@@ -1,6 +1,6 @@
-setwd("C:/Users/matte/Desktop/crt onesided noncompliance/att_estimation")
+setwd("C:/Users/matte/Desktop/att estimation noncompliance/att_estimation")
 # setwd("/home/mbonvini")
-library(ranger); library(dplyr); library(distrEx); source("./helpers.R")
+library(distrEx); source("./helpers.R")
 
 # Set parameters for simulation
 set.seed(1000); nsim <- 1000; counter <- 1; nsplits <- 5
@@ -65,14 +65,16 @@ for(att in attvals) {
             pa.x(alpha,beta,gamma,x,TRUE)*dnorm(x) }, 
             -Inf, Inf)
           
-          num <- function(delta) { distrExIntegrate(function(x) { 
-            
-            (pi.x(alpha,x,TRUE)*mu.x(beta,gamma,delta,x,TRUE) + 
-               lambda0.x(gamma,x,TRUE)*(mean.y(x,1,delta,TRUE)-unobs))*dnorm(x)}, 
-            
-            -Inf, Inf) }; att.fn <- function(delta) { num(delta)/p }
+          num <- function(delta, unobs) { distrExIntegrate(function(x) {
+
+            (pi.x(alpha,x,TRUE)*mu.x(beta,gamma,delta,x,TRUE) +
+               lambda0.x(gamma,x,TRUE)*(mean.y(x,1,delta,TRUE)-unobs))*dnorm(x)},
+
+            -Inf, Inf) }; att.fn <- function(delta, unobs) {num(delta, unobs)/p}
           
-          delta <- get_par(att.fn, -200, 200, att)
+          delta <- get_par(function(x) { att.fn(x, unobs) }, -200, 200, att)
+          
+          att.l <- att.fn(delta, 1); att.u <- att.fn(delta, 0)
           
           step <- nsim*length(experimentvals)*length(nvals)
           
@@ -84,20 +86,22 @@ for(att in attvals) {
             step2 <- step/length(experimentvals)
             
             res[counter:(counter+step2-1), c("eff.bound.lo")] <- 
-              get_eff_bound(alpha,beta,gamma,delta,p,att,TRUE,experiment)[1]
+              get_eff_bound(alpha,beta,gamma,delta,p,att.l,TRUE,experiment)[1]
             
             res[counter:(counter+step2-1), c("eff.bound.up")] <- 
-              get_eff_bound(alpha,beta,gamma,delta,p,att,TRUE,experiment)[2]
+              get_eff_bound(alpha,beta,gamma,delta,p,att.u,TRUE,experiment)[2]
             
             for(n in nvals) {
               
               for(i in 1:nsim) { 
                 
                 mess <- paste0("experiment = ", experiment, 
-                               "; n = ", n, "; ATT = ", att, 
-                               "; P(Z = 1) = ", zval, 
+                               "; n = ", n, 
+                               "; ATT = ", att, 
+                               "; lambda1 = ", lambda0,
+                               "; lambda0 = ", lambda1,
                                "; P(A = 1) = ", round(p, 2), 
-                               "; E{Y^0|A = 1, Z = 0, X} = ", unobs,
+                               "; unobs = ", unobs,
                                "; sim = ", i)
                 if(i%%100 == 0) print(mess); flush.console() 
                 
@@ -106,12 +110,12 @@ for(att in attvals) {
                 x <- rnorm(n); piz <- pi.x(alpha, x,TRUE); z <- rbinom(n,1,piz)
                 a <- rbinom(n, 1, z*lambda1.x(beta,x,TRUE) + 
                               (1-z)*lambda0.x(gamma,x,TRUE))
-                y <- rbinom(n, 1, mean.y(x,a,delta,TRUE))
+                y <- rbinom(n, 1, mean.y(x, a, delta, TRUE))
                 
                 mu0hat <- mu1hat <- lambda1hat <- lambda0hat <- beta10hat <- 
                   pihat <- rep(NA, n)
                 
-                df <- data.frame(y = y, a = a, z = z, x = x)
+                df <- data.frame(y = y, a = a, ya = y*a, z = z, x = x)
                 
                 s <- sample(rep(1:nsplits, ceiling(n/nsplits))[1:n])
                 
@@ -126,13 +130,12 @@ for(att in attvals) {
                   
                   # Estimation of the nuisance regression functions
                   
-                  if(sum(train0$a) > 0) {
+                  if(lambda0 > 0) {
                     
                     lambda0fit <- glm(a~x, data=train0, family=binomial)
                     lambda0hat[test.row] <- predict(lambda0fit,newdata=test,
                                                     type="response")
-                    beta10fit <- glm(y~x, data=train0[train0$a == 1, ],
-                                     family=binomial)
+                    beta10fit <- glm(ya~x, data=train0, family=binomial)
                     beta10hat[test.row] <- predict(beta10fit,newdata=test,
                                                    type="response")
                     
@@ -160,12 +163,12 @@ for(att in attvals) {
                                                   type="response")
                   
                 }
-                pihat.trunc <- truncate_ps(pihat, 0.01)
+                pihat.trunc <- truncate_ps(pihat)
                 
                 psi1 <- get_psi1(y,a,z,x,pihat.trunc,mu0hat)
                 
                 psi2 <- get_psi2(y,a,z,x,pihat.trunc,mu0hat,mu1hat,lambda1hat,
-                                 lambda0hat, beta10hat*lambda0hat,experiment)
+                                 lambda0hat, beta10hat, experiment)
                 
                 res[counter, c("experiment", "n", "att", "mean.z", "mean.a", 
                                "lambda0", "lambda1", "unobs")] <- c(experiment,
@@ -196,8 +199,8 @@ for(att in attvals) {
   }
 }
 
-load("./results_bin.RData")
-
+# load("./results_bin.RData")
+library(dplyr)
 agg.res <- res %>% group_by(experiment, n, att, mean.z, mean.a, 
                             lambda0, lambda1, unobs) %>%
   
@@ -229,7 +232,6 @@ agg.res <- res %>% group_by(experiment, n, att, mean.z, mean.a,
     psi2.to.eff.lo = mean(var.psi2.lo/eff.bound.lo),
     psi2.to.eff.up = mean(var.psi2.up/eff.bound.up))
 
-rounded.agg.res <- round(agg.res[agg.res$n == 2000 & 
-                                   agg.res$experiment == 1, ], 2)
+rounded.agg.res <- round(agg.res, 2)
 
 save(res, file = "./results_bin.RData")

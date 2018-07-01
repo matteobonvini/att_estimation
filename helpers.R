@@ -44,10 +44,10 @@ pa.x <- function(alpha, beta, gamma, x, trunc) {
 
 b1 <- b2 <- b3 <- 1 # they are all set to 1 in the poster
 
-# E{Y|X, A=a, Z=z} = E{Y|X, A = a}
+# E{Y|X, A = a, Z = z} = E{Y|X, A = a}
 mean.y <- function(x, a, delta, trunc) { 
   
-  probs <- a*expit(-delta + x) + (1-a)*expit(delta + x)
+  probs <- a*expit(-delta + x) + (1-a)*(delta - x/2)
   
   if(trunc) return(truncate_ps(probs))
   if(!trunc) return(probs)
@@ -112,6 +112,9 @@ get_phi <- function(t, z, pix, mu) {
   
 }
 
+# mu1 <- mu1hat; lambda1 <- lambda1hat; lambda0 <- lambda0hat;
+# beta10 <- beta10hat; experiment <- TRUE
+
 get_psi2 <- function(y, a, z, x, piz, mu0, mu1, lambda1, lambda0, beta10, 
                      experiment) {
   
@@ -156,6 +159,8 @@ get_psi2 <- function(y, a, z, x, piz, mu0, mu1, lambda1, lambda0, beta10,
   
 }
 
+# trunc <- TRUE
+
 eff.infl.curve <- function(y, a, z, x, alpha, beta, gamma, delta, p, att, lo, 
                            trunc, experiment) {
   
@@ -168,11 +173,10 @@ eff.infl.curve <- function(y, a, z, x, alpha, beta, gamma, delta, p, att, lo,
   
   beta10 <- mean.y(x, 1, delta, trunc)
   
-  infl.curve.up <- 1/p*( pz*(get_phi(y,z,pz,mu1) - get_phi(y,1-z,1-pz,mu0) ) +
-    
-    get_phi(y*a,1-z,1-pz,pa0*beta10) -
-    
-    att*(pz*get_phi(a,z,pz,pa1) + (1-pz)*get_phi(a,1-z,1-pz,pa0)) )
+  infl.curve.up <- 1/p*( pz*(get_phi(y,z,pz,mu1) - get_phi(y,1-z,1-pz,mu0) ) + 
+                           get_phi(y*a,1-z,1-pz,pa0*beta10) - 
+                           att*(pz*get_phi(a,z,pz,pa1) + 
+                                  (1-pz)*get_phi(a,1-z,1-pz,pa0) ) )
   
   infl.curve.lo <- infl.curve.up - 1/p*( get_phi(a,1-z,1-pz,pa0) )
   
@@ -195,9 +199,8 @@ get_eff_bound <- function(alpha, beta, gamma, delta, p, att, trunc, experiment){
     
     dy <- function(y, a, x) { 
       
-      if(y==1) return(mean.y(x, a, delta, trunc))
-      if(y==0) return(1 - mean.y(x, a, delta, trunc))
-      
+      return( mean.y(x,a,delta,trunc)^y*( 1-mean.y(x,a,delta,trunc) )^(1-y) )
+
     } 
     
     da <- function(a, z, x) { 
@@ -209,12 +212,12 @@ get_eff_bound <- function(alpha, beta, gamma, delta, p, att, trunc, experiment){
       
     }
     
-    dz <- function(z, x) {
+    dz <- function(z, x) { 
       
-      if(z==1) return(pi.x(alpha,x,trunc))
-      if(z==0) return(1-pi.x(alpha,x,trunc))
+      return( pi.x(alpha,x,trunc)^z*(1-pi.x(alpha,x,trunc))^(1-z) )
       
     }
+    
     dx <- function(x) { dnorm(x) }
 
     dens11 <- dy(y,1,x)*da(1,1,x)*dz(1,x)*dx(x)
@@ -239,18 +242,16 @@ get_eff_bound <- function(alpha, beta, gamma, delta, p, att, trunc, experiment){
 
   }
   
-  prec <- Inf
-
   inn.fn1 <- Vectorize(function(x, lo) { inn.fn(0, x, lo) + inn.fn(1, x, lo) } )
 
   eff.bound.lo <- distrExIntegrate(function(x) { inn.fn1(x, TRUE) }, 
-                                   -prec, prec)
+                                   -Inf, Inf)
   eff.bound.up <- distrExIntegrate(function(x) { inn.fn1(x, FALSE) }, 
-                                   -prec, prec)
+                                   -Inf, Inf)
   
   out <- c(eff.bound.lo, eff.bound.up)
   
-  # if(any(out <= 0)) stop("Efficiency bounds are negative!")
+  if(any(out <= 0)) stop("Efficiency bounds are negative!")
   
   return(out)
   
@@ -276,7 +277,7 @@ get_difference <- function(alpha, beta, gamma, delta, p, att, trunc=TRUE) {
 
 get_par <- function(fn, lo, hi, par) {
   
-  delta.seq <- seq(lo, hi, length.out = 1e4)
+  delta.seq <- seq(lo, hi, length.out = 5e4)
   vals <- sapply(delta.seq, fn)
   delta <- delta.seq[which.min(abs(par - vals))]
   
@@ -290,11 +291,6 @@ get_par <- function(fn, lo, hi, par) {
   return(delta)
   
 }
-# beta.x <- function(alpha, gamma, beta, x) {
-#   
-#   mean.y(x, 1, beta, trunc) - mean.y(x, 0, beta)
-#   
-# }
 
 ivatt <- function(y, a, z, x, pi.x=NULL, nsplits = 5) {
   
