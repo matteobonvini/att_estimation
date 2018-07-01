@@ -277,7 +277,7 @@ get_difference <- function(alpha, beta, gamma, delta, p, att, trunc=TRUE) {
 
 get_par <- function(fn, lo, hi, par) {
   
-  delta.seq <- seq(lo, hi, length.out = 5e4)
+  delta.seq <- seq(lo, hi, length.out = 1e4)
   vals <- sapply(delta.seq, fn)
   delta <- delta.seq[which.min(abs(par - vals))]
   

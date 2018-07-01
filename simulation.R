@@ -19,7 +19,8 @@ cols <- c("experiment", "n", "att", "mean.z", "mean.a",
           "psi2","psi2.ci1","psi2.ci2", 
           "psi1.var", "psi2.var", 
           "psi2.var.lo", "psi2.var.up",
-          "eff.bound.lo", "eff.bound.up", "diff.eff.bound.ps")
+          "eff.bound.lo", "eff.bound.up", 
+          "diff.eff.bound.ps.lo", "diff.eff.bound.ps.up")
 
 nrows1 <- nsim*length(nvals)*length(attvals)*length(zvals)*length(lambda1vals)
 nrows <- nrows1*length(lambda0vals)*length(unobsvals)
@@ -78,8 +79,11 @@ for(att in attvals) {
           
           step <- nsim*length(experimentvals)*length(nvals)
           
-          res[counter:(counter+step-1), c("diff.eff.bound.ps")] <-
-            get_difference(alpha, beta, gamma, delta, p, att, TRUE)
+          res[counter:(counter+step-1), c("diff.eff.bound.ps.lo")] <-
+            get_difference(alpha, beta, gamma, delta, p, att.l, TRUE)
+          
+          res[counter:(counter+step-1), c("diff.eff.bound.ps.up")] <-
+            get_difference(alpha, beta, gamma, delta, p, att.u, TRUE)
           
           for(experiment in experimentvals) {
             
@@ -227,7 +231,8 @@ agg.res <- res %>% group_by(experiment, n, att, mean.z, mean.a,
     eff.bound.lo = mean(eff.bound.lo),
     eff.bound.up = mean(eff.bound.up),
 
-    diff.eff.bound.ps = mean(diff.eff.bound.ps),
+    diff.eff.bound.ps.lo = mean(diff.eff.bound.ps.lo),
+    diff.eff.bound.ps.up = mean(diff.eff.bound.ps.up),
     psi1.to.eff.lo = mean(var.psi1/eff.bound.lo),
     psi2.to.eff.lo = mean(var.psi2.lo/eff.bound.lo),
     psi2.to.eff.up = mean(var.psi2.up/eff.bound.up))
