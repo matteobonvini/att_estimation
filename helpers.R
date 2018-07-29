@@ -16,22 +16,27 @@ truncate_ps <- function(pscores, eps = 1e-8) {
 
 pi.x <- function(alpha, x, trunc) { 
   
-  if(trunc) return(truncate_ps(expit(alpha + b0*x)))
-  else return(expit(alpha + b0*x))
+  probs = expit(alpha + b0*x + (x/10)^2 - 1*(x > 0.5))
+  if(trunc) return(truncate_ps(probs))
+  else return(expit(probs))
   
 }
 
 lambda1.x <- function(beta, x, trunc) { 
   
-  if(trunc) return(truncate_ps(expit(beta - x))) 
-  else return(expit(beta - x))
+  probs = expit(beta - x + (x/10)^2 + 1*(x >= -0.5))
+  
+  if(trunc) return(truncate_ps(probs)) 
+  else return(probs)
   
 }
 
 lambda0.x <- function(gamma, x, trunc) { 
   
-  if(trunc) return(truncate_ps(expit(gamma + x/2)))
-  else return(expit(gamma + x/2))
+  probs <- expit(gamma + x/2 - (x/10)^3 + 1*(x >= 1.5))
+  
+  if(trunc) return(truncate_ps(probs))
+  else return(expit(probs))
   
 }
 
@@ -47,7 +52,8 @@ b1 <- b2 <- b3 <- 1 # they are all set to 1 in the poster
 # E{Y|X, A = a, Z = z} = E{Y|X, A = a}
 mean.y <- function(x, a, delta, trunc) { 
   
-  probs <- a*expit(-delta + x) + (1-a)*(delta - x/2)
+  probs <- a*expit(-delta + x + (x/10)^2 + 1*(x <= 0.2)) + 
+    (1-a)*(delta - x + (x/10)^3)
   
   if(trunc) return(truncate_ps(probs))
   if(!trunc) return(probs)
@@ -153,7 +159,7 @@ get_psi2 <- function(y, a, z, x, piz, mu0, mu1, lambda1, lambda0, beta10,
   
   out <- list(est = mean(c(est.lo, est.up)), se = se, 
               var = se^2, var.lo.bd = var.est.lo, var.up.bd = var.est.up, 
-              ci = ci, calpha = calpha)
+              ci = ci, calpha = calpha, est.lo = est.lo, est.up = est.up)
   
   return(out)
   
@@ -289,77 +295,5 @@ get_par <- function(fn, lo, hi, par) {
   }
   
   return(delta)
-  
-}
-
-ivatt <- function(y, a, z, x, pi.x=NULL, nsplits = 5) {
-  
-  if(is.null(pi.x)) experiment <- FALSE
-  else experiment <- TRUE
-  
-  df <- cbind(data.frame(y = y, a = a, z = z), x)
-  
-  x <- names(x)
-  
-  n <- nrow(df)
-  
-  mu0hat <- mu1hat <- lambda1hat <- lambda0hat <- beta10hat <- 
-    pihat <- rep(NA, n)
-  
-  s <- sample(rep(1:nsplits, ceiling(n/nsplits))[1:n])
-  
-  for (vfold in 1:nsplits) {
-    
-    train.row <- s != vfold; test.row <- s == vfold
-    
-    if (nsplits == 1) { train.row <- test.row }
-    
-    train <- df[train.row,]; test <- df[test.row,]
-    train1 <- train[train$z==1,]; train0 <- train[train$z==0,]
-    
-    # Estimation of the nuisance regression functions
-    
-    if(sum(train0$a) > 0) {
-      
-      lambda0fit <- glm(a~ . -(y+z), data=train0, family=binomial)
-      lambda0hat[test.row] <- predict(lambda0fit,newdata=test,
-                                      type="response")
-      beta10fit <- glm(y~ . -(a+z), data=train0[train0$a == 1, ],
-                       family=binomial)
-      beta10hat[test.row] <- predict(beta10fit,newdata=test,
-                                     type="response")
-      
-    } else { lambda0hat[test.row] <- beta10hat[test.row] <- 0 }
-    
-    if(experiment) { pihat <- pi.x }
-    
-    else {
-      
-      pifit <- glm(z~ . -(y+a), data=train, family=binomial)
-      pihat[test.row] <- predict(pifit,newdata=test, 
-                                 type="response")
-      
-    }
-    
-    mu0fit <- glm(y~ . -(z+a), data=train0, family=binomial)
-    mu0hat[test.row] <- predict(mu0fit, newdata=test,
-                                type="response")
-    
-    mu1fit <- glm(y~ . -(z+a), data=train1, family=binomial)
-    mu1hat[test.row] <- predict(mu1fit, newdata=test,
-                                type="response")
-    
-    lambda1fit <- glm(a~ . -(z+y), data=train1, family=binomial)
-    lambda1hat[test.row] <- predict(lambda1fit,newdata=test,
-                                    type="response")
-    
-  }
-  
-  pihat.trunc <- truncate_ps(pihat, 0.01)
-  
-  psi2 <- get_psi2(y,a,z,x,pihat.trunc,mu0hat,mu1hat,lambda1hat,
-                   lambda0hat, beta10hat*lambda0hat,experiment)
-  
-  return(psi2)
   
 }
