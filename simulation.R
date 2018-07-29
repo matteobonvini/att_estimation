@@ -1,24 +1,22 @@
 setwd("C:/Users/matte/Desktop/att estimation noncompliance/att_estimation")
-# setwd("/home/mbonvini")
+
 library(distrEx); source("./helpers.R"); library(randomForest)
 
 # Set parameters for simulation
 set.seed(1000); nsim <- 500; counter <- 1; nsplits <- 5
-nvals <- 500; experimentvals <- FALSE
+nvals <- 500; experimentvals <- TRUE
 
 # zvals = P(Z = 1); attvals = ATT; lambdaZvals <- E{lambdaZ(X)}
 zvals <- 0.5; attvals <- 0.5
-lambda1vals <- 0.6; lambda0vals <- 0.4
+lambda1vals <- c(0.6, 0.8); lambda0vals <- c(0.0, 0.2, 0.4)
 
 # unobs = E{Y^0|A = 1, Z = 0, X} in [0,1], which cannot be observed
 unobsvals <- 0.5
 
 cols <- c("experiment", "n", "att", "mean.z", "mean.a", 
           "lambda0", "lambda1", "unobs",
-          "psi1","psi1.ci1", "psi1.ci2",
           "psi2.est.lo", "psi2.est.up", "psi2","psi2.ci1","psi2.ci2", 
-          "psi1.var", "psi2.var", 
-          "psi2.var.lo", "psi2.var.up",
+          "psi2.var", "psi2.var.lo", "psi2.var.up",
           "eff.bound.lo", "eff.bound.up", 
           "diff.eff.bound.ps.lo", "diff.eff.bound.ps.up")
 
@@ -67,10 +65,10 @@ for(att in attvals) {
             -Inf, Inf)
           
           num <- function(delta, unobs) { distrExIntegrate(function(x) {
-
+            
             (pi.x(alpha,x,TRUE)*mu.x(beta,gamma,delta,x,TRUE) +
                lambda0.x(gamma,x,TRUE)*(mean.y(x,1,delta,TRUE)-unobs))*dnorm(x)},
-
+            
             -Inf, Inf) }; att.fn <- function(delta, unobs) {num(delta, unobs)/p}
           
           delta <- get_par(function(x) { att.fn(x, unobs) }, -200, 200, att)
@@ -107,7 +105,7 @@ for(att in attvals) {
                                "; P(A = 1) = ", round(p, 2), 
                                "; unobs = ", unobs,
                                "; sim = ", i)
-                if(i%%1 == 0) print(mess); flush.console() 
+                if(i%%10 == 0) print(mess); flush.console() 
                 
                 # Simulate covariate (x), treat. assignment (z), 
                 # treat. received (a)
@@ -115,7 +113,7 @@ for(att in attvals) {
                 a <- rbinom(n, 1, z*lambda1.x(beta,x,TRUE) + 
                               (1-z)*lambda0.x(gamma,x,TRUE))
                 y <- rbinom(n, 1, mean.y(x, a, delta, TRUE))
-  
+                
                 mu0hat <- mu1hat <- lambda1hat <- lambda0hat <- beta10hat <- 
                   pihat <- rep(NA, n)
                 
@@ -132,23 +130,25 @@ for(att in attvals) {
                   if (nsplits == 1) { train.row <- test.row }
                   
                   train <- df[train.row,]; test <- df[test.row,]
-                  train1 <- train[train$z=="1",]; train0 <- train[train$z==0,]
+                  train1 <- train[train$z==1,]; train0 <- train[train$z==0,]
                   
                   # Estimation of the nuisance regression functions
                   
-                  tolprob <- 0.001
+                  tolprob <- 1e-5
                   
                   if(lambda0 > 0) {
                     
                     lambda0fit <- randomForest(a~x, data=train0, 
                                                keep.forest = TRUE)
                     lambda0hat[test.row] <- truncate_ps(predict(lambda0fit, test,
-                                                    type ="prob")[, "1"], tolprob)
+                                                                type="prob")[,"1"], 
+                                                        tolprob)
                     
                     beta10fit <- randomForest(ya~x, data=train0, 
                                               keep.forest = TRUE)
                     beta10hat[test.row] <- truncate_ps(predict(beta10fit, test, 
-                                                   type ="prob")[, "1"], tolprob)
+                                                               type="prob")[,"1"], 
+                                                       tolprob)
                     
                     
                   } else { lambda0hat[test.row] <- beta10hat[test.row] <- 0 }
@@ -156,33 +156,28 @@ for(att in attvals) {
                   if(experiment) { pihat <- piz }
                   else {
                     
-                    # pifit <- glm(z~x, data=train, family=binomial)
-                    # pihat[test.row] <- truncate_ps(predict(pifit, newdata=test,
-                    #                            type = "response"), tolprob)
-
-                    pifit <- randomForest(z~x, data=train,keep.forest = TRUE)
-                    pihat[test.row] <- truncate_ps(predict(pifit, test,
-                                                           type ="prob")[, "1"],
-                                                   tolprob)
-
+                    pifit <- glm(z~x, data=train, family=binomial)
+                    pihat[test.row] <- truncate_ps(predict(pifit, newdata=test,
+                                               type = "response"), tolprob)
+                    
                   }
                   
-                  mu0fit <- randomForest(y~x, data=train0, keep.forest = TRUE)
+                  mu0fit <- randomForest(y~x, data=train0, keep.forest=TRUE)
                   mu0hat[test.row] <- truncate_ps(predict(mu0fit, test, 
-                                              type = "prob")[, "1"], tolprob)
+                                                          type = "prob")[,"1"], 
+                                                  tolprob)
                   
-                  mu1fit <- randomForest(y~x, data=train1, keep.forest = TRUE)
+                  mu1fit <- randomForest(y~x, data=train1, keep.forest=TRUE)
                   mu1hat[test.row] <- truncate_ps(predict(mu1fit, test,
-                                              type = "prob")[, "1"], tolprob)
+                                                          type = "prob")[, "1"], 
+                                                  tolprob)
                   
-                  lambda1fit <- randomForest(a~x, data=train1, keep.forest = TRUE)
+                  lambda1fit <- randomForest(a~x, data=train1, keep.forest=TRUE)
                   lambda1hat[test.row] <- truncate_ps(predict(lambda1fit, test,
                                                               type="prob")[,"1"], 
                                                       tolprob)
                   
                 }
-                
-                psi1 <- get_psi1(y,a,z,x,pihat,mu0hat)
                 
                 psi2 <- get_psi2(y,a,z,x,pihat,mu0hat,mu1hat,lambda1hat,
                                  lambda0hat, beta10hat, experiment)
@@ -195,12 +190,8 @@ for(att in attvals) {
                                                                     lambda1, 
                                                                     unobs)
                 
-                res[counter, c("psi1","psi1.ci1", "psi1.ci2")] <- c(psi1$est, 
-                                                                    psi1$ci)
                 res[counter, c("psi2","psi2.ci1", "psi2.ci2")] <- c(psi2$est, 
                                                                     psi2$ci)
-                
-                res[counter, c("psi1.var", "psi2.var")] <- c(psi1$var, psi2$var)
                 
                 res[counter, c("psi2.var.lo", "psi2.var.up", 
                                "psi2.est.lo", "psi2.est.up")] <- 
@@ -222,47 +213,25 @@ agg.res <- res %>% group_by(experiment, n, att, mean.z, mean.a,
                             lambda0, lambda1, unobs) %>%
   
   summarize(
-    # bias.psi1 = mean(sqrt(n)*(psi1 - att)),
-    bias.psi2 = mean(sqrt(n)*(psi2 - att)),
     
-    # cvg.psi1 = mean(psi1.ci1 <= att & att <= psi1.ci2),
+    bias.psi2 = mean(sqrt(n)*(psi2 - att)),
     cvg.psi2 = mean(psi2.ci1 <= att & att <= psi2.ci2),
     
-    # pwr.psi1 = 1 - mean(psi1.ci1 < 0 & 0 < psi1.ci2),
-    # pwr.psi2 = 1 - mean(psi2.ci1 < 0 & 0 < psi2.ci2),
-    
-    # length.ci.psi1 = mean(psi1.ci2 - psi1.ci1),
-    # length.ci.psi2 = mean(psi2.ci2 - psi2.ci1),
-    
-    # var.psi1 = mean(psi1.var),
-    # var.psi2 = mean(psi2.var),
     var.psi2.lo = mean(psi2.var.lo),
     var.psi2.up = mean(psi2.var.up),
-
-    # eff.ratio.1to2 = mean(psi1.var/psi2.var), 
-
+    
     eff.bound.lo = mean(eff.bound.lo),
     eff.bound.up = mean(eff.bound.up),
-
-    # diff.eff.bound.ps.lo = mean(diff.eff.bound.ps.lo),
-    # diff.eff.bound.ps.up = mean(diff.eff.bound.ps.up),
-    # psi1.to.eff.lo = mean(var.psi1/eff.bound.lo),
+    
     psi2.to.eff.lo = mean(var.psi2.lo/eff.bound.lo),
     psi2.to.eff.up = mean(var.psi2.up/eff.bound.up),
     
     bound.width = (mean(psi2.est.up) - mean(psi2.est.lo)),
     teor.bound.width = mean(lambda0/mean.a),
-    teor.bound.withd.ace = mean(lambda1 + lambda0))
+    teor.bound.width.ace = mean(1- lambda1 + lambda0) # e.g. Robins (1989)
+    
+  )
 
 rounded.agg.res <- round(agg.res, 2)
-
-# checks <- res %>% group_by(n, att, mean.z, mean.a, 
-#                            lambda0, lambda1, unobs) %>%
-#   summarize(diff.lo = mean(eff.bound.lo[experiment == 0] - eff.bound.lo[experiment == 1]),
-#             theor.diff.lo = mean(diff.eff.bound.ps.lo),
-#             abs(diff.lo - theor.diff.lo),
-#             diff.up = mean(eff.bound.up[experiment == 0] - eff.bound.up[experiment == 1]),
-#             theor.diff.up = mean(diff.eff.bound.ps.up),
-#             abs(diff.up - theor.diff.up))
 
 # save(res, file = "./results_bin_jsm.RData")

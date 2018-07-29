@@ -2,9 +2,6 @@
 
 expit <- function(x){ exp(x)/(1+exp(x)) }; logit <- function(x) { log(x/(1-x))}
 
-b0 <- 1 #b0 = 0 means CRT
-
-
 # to avoid problems with positivity assumption, we truncate the prop. scores
 truncate_ps <- function(pscores, eps = 1e-8) {
   
@@ -16,7 +13,7 @@ truncate_ps <- function(pscores, eps = 1e-8) {
 
 pi.x <- function(alpha, x, trunc) { 
   
-  probs = expit(alpha + b0*x + (x/10)^2 - 1*(x > 0.5))
+  probs = expit(alpha + x + (x/10)^2 - 1*(x > 0.5))
   if(trunc) return(truncate_ps(probs))
   else return(expit(probs))
   
@@ -24,7 +21,7 @@ pi.x <- function(alpha, x, trunc) {
 
 lambda1.x <- function(beta, x, trunc) { 
   
-  probs = expit(beta - x + (x/10)^2 + 1*(x >= -0.5))
+  probs = expit(beta + (x/10)^2 + 1*(x >= -0.5))
   
   if(trunc) return(truncate_ps(probs)) 
   else return(probs)
@@ -33,7 +30,7 @@ lambda1.x <- function(beta, x, trunc) {
 
 lambda0.x <- function(gamma, x, trunc) { 
   
-  probs <- expit(gamma + x/2 - (x/10)^3 + 1*(x >= 1.5))
+  probs <- expit(gamma - (x/10)^3 + 1*(x >= 1.5))
   
   if(trunc) return(truncate_ps(probs))
   else return(expit(probs))
@@ -52,8 +49,8 @@ b1 <- b2 <- b3 <- 1 # they are all set to 1 in the poster
 # E{Y|X, A = a, Z = z} = E{Y|X, A = a}
 mean.y <- function(x, a, delta, trunc) { 
   
-  probs <- a*expit(-delta + x + (x/10)^2 + 1*(x <= 0.2)) + 
-    (1-a)*(delta - x + (x/10)^3)
+  probs <- a*expit(-delta + x^2 + 1*(x <= 0.2)) + 
+    (1-a)*(delta - x^2)
   
   if(trunc) return(truncate_ps(probs))
   if(!trunc) return(probs)
@@ -118,9 +115,6 @@ get_phi <- function(t, z, pix, mu) {
   
 }
 
-# mu1 <- mu1hat; lambda1 <- lambda1hat; lambda0 <- lambda0hat;
-# beta10 <- beta10hat; experiment <- TRUE
-
 get_psi2 <- function(y, a, z, x, piz, mu0, mu1, lambda1, lambda0, beta10, 
                      experiment) {
   
@@ -154,18 +148,14 @@ get_psi2 <- function(y, a, z, x, piz, mu0, mu1, lambda1, lambda0, beta10,
   calpha <- get_calpha(length(y), est.lo, est.up)
   
   ci <- c(est.lo - calpha*se.lo, est.up + calpha*se.up)
-  
-  se <- (ci[2] - ci[1])/(2*calpha)*sqrt(length(y))
-  
-  out <- list(est = mean(c(est.lo, est.up)), se = se, 
-              var = se^2, var.lo.bd = var.est.lo, var.up.bd = var.est.up, 
+
+  out <- list(est = mean(c(est.lo, est.up)), 
+              var.lo.bd = var.est.lo, var.up.bd = var.est.up, 
               ci = ci, calpha = calpha, est.lo = est.lo, est.up = est.up)
   
   return(out)
   
 }
-
-# trunc <- TRUE
 
 eff.infl.curve <- function(y, a, z, x, alpha, beta, gamma, delta, p, att, lo, 
                            trunc, experiment) {
